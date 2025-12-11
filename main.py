@@ -1,58 +1,53 @@
-from fastapi import FastAPI
-from database import session,engine
+from fastapi import FastAPI,Depends,HTTPException
+from database import sessionLocal,engine
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 import database_models
-from models import Product
+from database_models import Base
+from models import ProductIn,ProductOut
 app = FastAPI()
 
+# Base.metadata.create_all(bind=engine)
+def get_db():
+  db = sessionLocal()
+  try:
+   yield db
+  finally:
+    db.close()
+  
+  
+product_orm_object = database_models.Product
+@app.post("/create/product/",response_model =ProductOut)
+async def create_product(data:ProductIn,db:Session = Depends(get_db)):
+  orm_product = database_models.Product(**data.model_dump())
+  # print(orm_product)
+  db.add(orm_product)
+  try:
+   db.commit()
+   db.refresh(orm_product)
+  except IntegrityError:
+    db.rollback()
+    raise HTTPException(400,"Product already exist!!!")
+  return ProductOut.model_validate(orm_product)
 
-products = [
-    Product(
-        id=1,
-        name="Laptop Stand",
-        description="A lightweight adjustable laptop stand made of aluminum.",
-        price = 200.00,
-        quantity=50
-    ),
-    Product(
-        id=2,
-        name="Wireless Mouse",
-        description="Ergonomic 2.4GHz wireless mouse with USB receiver.",
-        price = 300.00,
-        quantity=120
-    ),
-    Product(
-        id=3,
-        name="Mechanical Keyboard",
-        description="RGB backlit mechanical keyboard with blue switches.",
-        price=400,
-        quantity=30
-    ),
-    Product(
-        id=4,
-        name="USB-C Cable",
-        description="1-meter fast-charging USB-C cable.",
-        price = 500.00,
-        quantity=200
-    )
-]
+@app.get("/product/{id}/",response_model=ProductOut)
+async def check(id:int,db:Session = Depends(get_db)):
+  product = db.query(product_orm_object).filter(product_orm_object.id == id).first()
+  if not product:
+    raise HTTPException(404,"Product doesn't exist")
+  
+  return ProductOut.model_validate(product)
 
+@app.get("/products/",response_model = list[ProductOut])
+async def get_all_product(db:Session = Depends(get_db)):
+  products = db.query(product_orm_object).all()
+  return [ProductOut.model_validate(product) for product in products]
 
-database_models.Base.metadata.create_all(bind=engine)
-
-
-def add_dumy_data():
-  db = session()
-  count = db.query(database_models.Product).count()
-  if count == 0:
-    for product in products:
-      db.add(database_models.Product(**product.model_dump()))
-    db.commit()
-async def db_injection():
-  db = session()
-  yield db
-  db.close()
-add_dumy_data() 
-
-@app.get("/")
-async def check():
-  return {"msg":"check"}
+@app.delete("/delete/{id}")
+async def delete_product(id:int,db:Session = Depends(get_db)):
+  product_to_delete = db.query(product_orm_object).filter(product_orm_object.id == id).first()
+  if not product_to_delete:
+    raise HTTPException(404,"product doesn't exist")
+  db.delete(product_to_delete)
+  db.commit()
+  return {"detail":"User deleted"}
