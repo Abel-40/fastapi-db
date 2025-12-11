@@ -6,8 +6,6 @@ import database_models
 from database_models import Base
 from models import ProductIn,ProductOut
 app = FastAPI()
-
-# Base.metadata.create_all(bind=engine)
 def get_db():
   db = sessionLocal()
   try:
